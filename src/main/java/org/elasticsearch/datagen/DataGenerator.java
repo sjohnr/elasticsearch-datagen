@@ -1,23 +1,103 @@
 package org.elasticsearch.datagen;
 
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Random;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 public class DataGenerator {
-	public static void main(String[] args) {
+	private static Random rand = new Random();
+	private static DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
+	private static ObjectMapper mapper = new ObjectMapper();
+	
+	private static final String[] CATEGORIES = {
+		"Home", "Grocery", "Outdoor", "Hardware", "Plumbing", "Clothing"
+	};
+	
+	private static final float[] PRICES = {
+		23.99f, 99.99f, 50f, 100f, 299.95f, 88.50f, 37.25f, 5.77f
+	};
+	
+	private static final String[] DESCRIPTIONS = {
+		"Bottle Opener",
+		"Toilet Paper (single-ply)",
+		"Toilet Paper (2-ply)",
+		"Paper Plates (500x)",
+		"Paper Plates (150x)",
+		"PVC Pipe - L-joint - 3.25\"",
+		"Paint - White",
+		"Lawn Chair",
+		"Screwdriver",
+		"Polo Shirt",
+		"Pepperoni Pizza"
+	};
+	
+	private static final int[] UNITS = {
+		1, 2, 3, 5, 17, 25, 99
+	};
+	
+	public static void main(String[] args) throws Exception {
 		String hostName = getProperty("es.host", "localhost");
 		int port = getProperty("es.port", 9200);
+		int durationMinutes = getProperty("es.duration", 30);
+		int volPerSec = getProperty("es.volume", 50);
 		
-		new DataGenerator().run(hostName, port);
+		new DataGenerator().run(hostName, port, durationMinutes, volPerSec);
 	}
 	
-	private void run(String hostName, int port) {
-		// TODO Auto-generated method stub
-		
+	private void run(String hostName, int port, int durationMinutes, int volPerSec) throws Exception {
+		long now = System.currentTimeMillis();
+		long then = now - (durationMinutes * 60 * 1000l);
+		for (long x = then; x <= now; x += 1000) {
+			for (int y = 0, r = rand.nextInt(volPerSec); y < r; y++) {
+				String descr = rand(DESCRIPTIONS);
+				String cat = rand(CATEGORIES);
+				int units = rand(UNITS);
+				float price = rand(PRICES);
+				float total = price * units;
+				Date date = new Date(x);
+				
+//				System.out.printf("%-35s %-40s %-12s $%7.2f %5d    $%9.2f", date.toString(), descr, cat, price, units, total);
+//				System.out.println();
+				
+				Map<String, Object> map = new LinkedHashMap<String, Object>();
+				map.put("timestamp", df.format(date));
+				map.put("description", descr);
+				map.put("category", cat);
+				map.put("units", units);
+				map.put("price", price);
+				map.put("total", total);
+				
+				String json = mapper.writeValueAsString(map);
+				System.out.println(json);
+			}
+		}
+	}
+	
+	private static String rand(String[] elems) {
+		int index = rand.nextInt(elems.length);
+		return elems[index];
+	}
+	
+	private static float rand(float[] elems) {
+		int index = rand.nextInt(elems.length);
+		return elems[index];
+	}
+	
+	private static int rand(int[] elems) {
+		int index = rand.nextInt(elems.length);
+		return elems[index];
 	}
 
-	public static String getProperty(String key, String defaultValue) {
+	private static String getProperty(String key, String defaultValue) {
 		return System.getProperty(key, defaultValue);
 	}
 	
-	public static int getProperty(String key, int defaultValue) {
+	private static int getProperty(String key, int defaultValue) {
 		int intValue = defaultValue;
 		try {
 			String value = System.getProperty(key);
