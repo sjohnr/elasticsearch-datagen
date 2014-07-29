@@ -7,11 +7,20 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
 
+import org.elasticsearch.action.WriteConsistencyLevel;
+import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.support.replication.ReplicationType;
+import org.elasticsearch.client.Client;
+import org.elasticsearch.client.transport.TransportClient;
+import org.elasticsearch.common.settings.ImmutableSettings;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.transport.InetSocketTransportAddress;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class DataGenerator {
 	private static Random rand = new Random();
-	private static DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ");
+	private static DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
 	private static ObjectMapper mapper = new ObjectMapper();
 	
 	private static final String[] CATEGORIES = {
@@ -41,19 +50,48 @@ public class DataGenerator {
 	};
 	
 	public static void main(String[] args) throws Exception {
-		String hostName = getProperty("es.host", "localhost");
-		int port = getProperty("es.port", 9200);
+		new DataGenerator().run();
+	}
+	
+	private static Client getClient() {
+		String clusterName = getProperty("es.cluster.name", "elasticsearch");
+		Settings settings = ImmutableSettings
+				.settingsBuilder()
+				.put("cluster.name", clusterName)
+				.build();
+		
+		String[] hosts = getProperty("es.unicast.hosts", "localhost").split(",");
+		int port = getProperty("es.unicast.port", 9300);
+		
+		TransportClient client = new TransportClient(settings);
+		for (String host : hosts) {
+			client.addTransportAddress(new InetSocketTransportAddress(host, port));
+		}
+		
+		return client;
+	}
+	
+	private static BulkRequestBuilder getRequest(Client client) {
+		return client.prepareBulk()
+				.setConsistencyLevel(WriteConsistencyLevel.DEFAULT)
+				.setReplicationType(ReplicationType.SYNC)
+				.setRefresh(false)
+				.setTimeout("30s");
+	}
+	
+	private void run() throws Exception {
+		String index = getProperty("es.index.name", "items");
+		String mapping = getProperty("es.mapping.name", "purchases");
+		Client client = getClient();
+		BulkRequestBuilder request = getRequest(client);
+		
 		int durationMinutes = getProperty("es.duration", 30);
 		int volPerSec = getProperty("es.volume", 50);
 		
-		new DataGenerator().run(hostName, port, durationMinutes, volPerSec);
-	}
-	
-	private void run(String hostName, int port, int durationMinutes, int volPerSec) throws Exception {
 		long now = System.currentTimeMillis();
 		long then = now - (durationMinutes * 60 * 1000l);
 		for (long x = then; x <= now; x += 1000) {
-			for (int y = 0, r = rand.nextInt(volPerSec); y < r; y++) {
+			for (int y = 0, r = rand.nextInt(volPerSec) + 1; y < r; y++) {
 				String descr = rand(DESCRIPTIONS);
 				String cat = rand(CATEGORIES);
 				int units = rand(UNITS);
@@ -73,9 +111,16 @@ public class DataGenerator {
 				map.put("total", total);
 				
 				String json = mapper.writeValueAsString(map);
-				System.out.println(json);
+//				System.out.println(json);
+				
+				request.add(client.prepareIndex(index, mapping).setSource(json));
 			}
+			
+			request.execute().actionGet();
+			request = getRequest(client);
 		}
+		
+		client.close();
 	}
 	
 	private static String rand(String[] elems) {
